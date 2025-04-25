@@ -1,0 +1,1186 @@
+import os
+import tkinter as tk
+from tkinter import Canvas
+import customtkinter as ctk
+import sys
+from tkinter import font
+from PIL import Image, ImageTk
+import matplotlib.pyplot as plt
+import pandas as pd
+from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+from tkintermapview import TkinterMapView
+import numpy as np
+import matplotlib.colors as mcolors
+import firebase_admin
+from firebase_admin import credentials, db
+import time
+import math
+import random  # For simulating data changes
+
+
+# Inisialisasi Firebase
+if getattr(sys, 'frozen', False):  
+    base_path = sys._MEIPASS  # Folder sementara PyInstaller saat running .exe
+else:
+    base_path = os.path.dirname(os.path.abspath(__file__))  # Lokasi skrip Python
+
+# Path ke credentials.json
+cred_path = os.path.join(base_path, 'credentials.json')
+
+# Cek apakah file ditemukan
+if os.path.exists(cred_path):
+    print(f"File ditemukan: {cred_path}")
+else:
+    print("File tidak ditemukan! Pastikan 'credentials.json' disertakan.")
+
+# Load credential
+cred = credentials.Certificate(cred_path)
+print("Credentials berhasil dimuat!")
+firebase_admin.initialize_app(cred, {
+    'databaseURL': 'https://wikantracksim-default-rtdb.firebaseio.com/'
+})
+AvgBpm = [[] for _ in range(5)]
+Bpm = [[] for _ in range(5)]
+Status= [[] for _ in range(5)]  
+Rssi = [[] for _ in range(5)]
+Temp = [[] for _ in range(5)]
+Latitude = [[] for _ in range(5)]
+Longitude = [[] for _ in range(5)]
+distance = [[] for _ in range(5)]
+# Array untuk menyimpan data sementara setiap personel
+
+data_listview= [
+    {"name": "Personel 1", "persen": 80,"kondisi": "Sehat", "color": "#39FF14"},
+    {"name": "Personel 2", "persen": 50,"kondisi": "Kurang Sehat","color":"#FFA500"},
+    {"name": "Personel 3", "persen": 30,"kondisi": "Not Found","color": "#FF0033"},
+    {"name": "Personel 4", "persen": 60,"kondisi": "Not Found","color": "#FF0033"},
+    {"name": "Personel 5", "persen": 80,"kondisi": "Not Found","color": "#FF0033"},
+]
+# Warna utama
+BG_COLOR = "#1E1E2E"       # Warna latar belakang utama
+CARD_COLOR = "#2B2B36"     # Warna kartu personel
+TEXT_COLOR = "#FFFFFF"     # Warna teks utama
+PROGRESS_COLOR = "#E9A84E" # Warna progress bar (kuning emas)
+FONT_TITLE = ("Arial", 14, "bold")
+FONT_LABEL = ("Arial", 10)
+MATERIAL_FONT = ("Arial", 14)
+
+electric_colors = ["#FF073A", "#7DF9FF", "#FFFF33", "#BF00FF", "#00FF66"]
+btn_colors = ["#FF073A", "#7DF9FF", "#FFFF33", "#BF00FF", "#00FF66"]
+personel_data = [
+    {"name": "Personel 1", "hr": 0, "temp": 0, "rssi": 0, "color": "#FF073A"},  # Biru
+    {"name": "Personel 2", "hr": 0, "temp": 0, "rssi": 0, "color": "#7DF9FF"}, # Hijau
+    {"name": "Personel 3", "hr": 0, "temp": 0, "rssi": 0, "color": "#FFFF33"},  # Merah
+    {"name": "Personel 4", "hr": 0, "temp": 0, "rssi": 0, "color": "#BF00FF"},
+    {"name": "Personel 5", "hr": 0, "temp": 0, "rssi": 0, "color": "#00FF66"}
+]
+Person1 = [["Personel1",10,25,46,"#FF073A"],["Personel2",170,18,80,"#7DF9FF"],["Personel3",20,19,75,"#FFFF33"],["Personel4",70,19,75,"#BF00FF"],["Personel5",30,19,75,"#00FF66"]]
+heart_rate_data = [
+    [],  # Personel 1
+    [],  # Personel 2
+    [],  # Personel 3
+    [],  # Personel 4
+    []   # Personel 5
+]
+
+Rssis = [[] for _ in range(5)]
+
+# List untuk menyimpan marker
+markers = []
+
+list_frame = None
+personel_labels = []
+
+def create_header():
+    global list_frame
+    header_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10, height=30)
+    header_frame.grid(row=0, column=0, sticky="ew")
+
+    headers = ["No", "Name", "Rate", "Summary"]
+    header_positions = [25, 120, 480, 590]
+    for i, header in enumerate(headers):
+        label = ctk.CTkLabel(header_frame, text=header, font=("Cyberpunk", 14, "bold"), text_color="#87888C")
+        label.place(x=header_positions[i], y=3)
+
+def create_personel_data():
+    global list_frame, data_listview
+    personel_labels = []
+
+    for idx, person in enumerate(data_listview, start=1):
+        row_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10, height=20)
+        row_frame.grid(row=idx, column=0, sticky="ew", padx=10, pady=3)
+
+        number_label = ctk.CTkLabel(row_frame, text=str(idx), font=("Cyberpunk", 14), text_color="#EFE5E5")
+        number_label.grid(row=0, column=0, padx=20, pady=2)
+
+        name_label = ctk.CTkLabel(row_frame, text=person["name"], font=("Cyberpunk", 14), text_color="#EFE5E5")
+        name_label.grid(row=0, column=1, padx=50, pady=2)
+
+        progress = ctk.CTkProgressBar(row_frame, width=100, height=8, fg_color="#22223b", progress_color=person["color"])
+        progress.grid(row=0, column=2, padx=50, pady=2)
+        progress.set(person["persen"] / 100)
+
+        percentage_label = ctk.CTkLabel(row_frame, text=f"{person['persen']}%", font=("Cyberpunk", 12), text_color="#EFE5E5", fg_color="#2B2B36", corner_radius=10)
+        percentage_label.grid(row=0, column=3, padx=50, pady=2)
+
+        status_label = ctk.CTkLabel(row_frame, text=person["kondisi"], font=("Cyberpunk", 12), text_color="#EFE5E5", fg_color="#2B2B36", corner_radius=10)
+        status_label.grid(row=0, column=4, padx=10, pady=2)
+
+        personel_labels.append((progress, percentage_label, status_label, person))
+
+    return personel_labels
+
+def update_personel_data(personel_labels):
+    global data_listview
+
+    for idx, person in enumerate(data_listview):
+        progress, percentage_label, status_label, _ = personel_labels[idx]
+
+        progress.set(person["persen"] / 100)
+        percentage_label.configure(text=f"{person['persen']}%")
+        status_label.configure(text=person["kondisi"])
+
+    root.after(2000, update_personel_data, personel_labels)
+
+def start_simulation():
+    global list_frame, data_listview
+    create_header()
+    personel_labels = create_personel_data()
+
+    update_personel_data(personel_labels)
+
+
+
+def resource_path(relative_path):
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+
+    return os.path.join(base_path, relative_path)
+def update_markers(gmap_widget):
+    """ Fungsi untuk memperbarui posisi marker secara real-time """
+    global markers
+
+    # Hapus semua marker lama
+    for marker in markers:
+        marker.delete()
+
+    markers = []  # Kosongkan list marker
+
+    # Tambahkan marker baru dengan koordinat yang diperbarui
+    for i in range(5):
+        marker = gmap_widget.set_marker(Latitude[i], Longitude[i], text=f"Prajurit {i+1}")
+        markers.append(marker)
+
+    # Panggil lagi setelah 1 detik
+    gmap_widget.after(2000, lambda: update_markers(gmap_widget))
+
+
+# Fungsi untuk menghitung jarak antar koordinat (latitude, longitude)
+def calculate_distance(lat1, lon1, lat2, lon2):
+    R = 6371  # Radius bumi dalam kilometer
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    delta_phi = math.radians(lat2 - lat1)
+    delta_lambda = math.radians(lon2 - lon1)
+
+    a = math.sin(delta_phi / 2)**2 + math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2)**2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+    return R * c # Mengembalikan jarak dalam kilometer
+
+def update_ui(personel_data):
+    global personnel_frame
+
+    # Loop through each person in the personel_data and create/update UI elements
+    for idx, person in enumerate(personel_data[:5]):  # Only take 5 personnel
+        # Outer box as border
+        border_frame = ctk.CTkFrame(personnel_frame, fg_color="#3A3A4A", corner_radius=10)
+        border_frame.grid(row=0, column=idx, padx=3, pady=3)  # Use grid to align the boxes
+
+        # Main personnel box (slightly smaller)
+        frame = ctk.CTkFrame(border_frame, fg_color="#22223b", corner_radius=8, width=60, height=160)
+        frame.pack(padx=3, pady=3)
+        
+        # Personnel icon (small circle)
+        icon = ctk.CTkCanvas(frame, width=20, height=20, bg="#22223b", highlightthickness=0)
+        icon.create_oval(3, 3, 18, 18, fill=person["color"], outline=person["color"])
+        icon.pack(pady=2)
+
+        # Name of the personnel (smaller font)
+        name_label = ctk.CTkLabel(frame, text=person["name"], font=("Arial", 9, "bold"), text_color="#EFE5E5", wraplength=70)
+        name_label.pack(pady=1)
+
+        # Create and store the labels for HR, Temp, and RSSI
+        person["hr_label"] = ctk.CTkLabel(frame, text=f"{person['hr']} BPM", font=("Arial", 8), text_color="#EFE5E5")
+        person["hr_label"].pack(pady=1)
+
+        person["temp_label"] = ctk.CTkLabel(frame, text=f"{person['temp']} °C", font=("Arial", 8), text_color="#EFE5E5")
+        person["temp_label"].pack(pady=1)
+
+        person["rssi_label"] = ctk.CTkLabel(frame, text=f"{person['rssi']} dBm", font=("Arial", 8), text_color="#EFE5E5")
+        person["rssi_label"].pack(pady=1)
+
+        # Create a single row with the progress bar for HR, Temp, and RSSI
+        def create_data_row(label_text, value, unit, max_value):
+            row_frame = ctk.CTkFrame(frame, fg_color="#22223b")
+            row_frame.pack(fill="x", pady=1, padx=1)
+
+            # Label for the data type (HR, Temp, RSSI)
+            label = ctk.CTkLabel(row_frame, text=label_text, font=("Arial", 8), text_color="#87888C", width=30, anchor="w")
+            label.pack(side="left")
+
+            # Progress bar for the data (HR, Temp, RSSI)
+            bar = ctk.CTkProgressBar(row_frame, width=50, height=4, progress_color=person["color"], fg_color="#22223b")
+            bar.set(value / max_value)
+            bar.pack(side="left", padx=1)
+
+            # Store the progress bars in the person dictionary for later updates
+            if label_text == "HR":
+                person["hr_bar"] = bar
+            elif label_text == "Tmp":
+                person["temp_bar"] = bar
+            elif label_text == "RSSI":
+                person["rssi_bar"] = bar
+
+        # Create data rows for HR, Temp, and RSSI
+        create_data_row("HR", person["hr"], "Bpm", 150)
+        create_data_row("Tmp", person["temp"], "°C", 40)
+        create_data_row("RSSI", person["rssi"], "dB", 100)
+
+# Function to simulate real-time data update (this will be replaced with actual data fetching in your case)
+def simulate_data_update():
+    global personel_data
+    # Simulate some data change for testing
+    for person in personel_data:
+
+
+        # Update the progress bars
+        person["hr_bar"].set(person["hr"] / 150)  # Update HR progress bar
+        person["temp_bar"].set(person["temp"] / 40)  # Update Temp progress bar
+        person["rssi_bar"].set(person["rssi"] / 100)  # Update RSSI progress bar
+        
+        # Update the labels with the new values (only update text once)
+        person["hr_label"].configure(text=f"{person['hr']} BPM")
+        person["temp_label"].configure(text=f"{person['temp']} °C")
+        person["rssi_label"].configure(text=f"{person['rssi']} dBm")
+
+    # Schedule next update after 2 seconds
+    root.after(2000, simulate_data_update)
+# Start the simulation and update the UI every 2 seconds
+"""
+def update_personel_data(personel_data, new_rate):
+    for i, person in enumerate(personel_data):
+        # Perbarui rate (Avgs) berdasarkan data baru
+        person[1] = new_rate  # Update rate di person[1]
+
+        # Update status dan warna berdasarkan Avgs
+        if new_rate >= 100:
+            person[2] = "Sehat"
+            person[3] = "#39FF14"  # Hijau
+        elif new_rate >= 50:
+            person[2] = "Kurang Sehat"
+            person[3] = "#FFA500"  # Kuning
+        else:
+            person[2] = "Not Found"
+            person[3] = "#FF0033"  # Merah
+"""
+
+# Inisialisasi Firebase (pastikan sudah dilakukan di awal program)
+# firebase_admin.initialize_app( ... )
+
+# Simpan data sebelumnya untuk perbandingan
+previous_data = {}
+
+def get_firebase_data():
+    global previous_data  # Gunakan variabel global untuk menyimpan data sebelumnya
+    
+    ref = db.reference('/')  # Ambil semua data dari root database
+    data = ref.get()
+
+    if data:
+        avg_bpm = data.get("AvgBPM", 0)  # Ambil nilai AvgBPM hanya sekali
+
+        for i in range(5):
+            # Ambil data per personel
+            new_data = {
+                "Avgs": data.get(f"AVG{i+1}", 0),
+                "Bpm": data.get(f"BPM{i+1}", 0),
+                "Rssi": data.get(f"rssi{i+1}", 0),
+                "Temps": data.get(f"TEMP{i+1}", 0),
+                "Latitude": float(data.get(f"Lat{i+1}", "0")),
+                "Longitude": float(data.get(f"Long{i+1}", "0"))
+            }
+
+            # Cek apakah data berbeda dari sebelumnya
+            if new_data != previous_data.get(i, {}):
+                # Update hanya jika data baru berbeda
+                heart_rate_data[i].append(new_data["Avgs"])
+                Bpm[i].append(new_data["Bpm"])
+                Rssis[i].append(new_data["Rssi"])
+                Temp[i].append(new_data["Temps"])
+                Latitude[i] = new_data["Latitude"]
+                Longitude[i] = new_data["Longitude"]
+                personel_data[i]["hr"] = new_data["Avgs"]
+                personel_data[i]["rssi"] = new_data["Rssi"]
+                personel_data[i]["temp"] = new_data["Temps"]
+                #update_personel_data(data, new_data["Avgs"])
+              
+                data_listview[i]["persen"] = new_data["Avgs"]
+
+                # Update kondisi dan warna
+                if data_listview[i]["persen"] >= 70:
+                    data_listview[i]["kondisi"] = "Sehat"
+                    data_listview[i]["color"] = "#39FF14"
+                elif data_listview[i]["persen"] >= 40:
+                    data_listview[i]["kondisi"] = "Kurang Sehat"
+                    data_listview[i]["color"] = "#FFA500"
+                else:
+                    data_listview[i]["kondisi"] = "Kritis"
+                    data_listview[i]["color"] = "#FF0033"
+                # Update Google Maps
+                gmap_widget.set_position(-7.958360333, 112.6008825)
+                gmap_widget.set_marker(Latitude[i], Longitude[i], text=f"Prajurit {i+1}")
+
+                # Hitung jarak
+                distance[i] = calculate_distance(
+                    float(Latitude[0]) if Latitude[0] != "N/A" else 0.0,
+                    float(Longitude[0]) if Longitude[0] != "N/A" else 0.0,
+                    float(Latitude[i]) if Latitude[i] != "N/A" else 0.0,
+                    float(Longitude[i]) if Longitude[i] != "N/A" else 0.0
+                )
+
+                # Cetak hasil untuk debugging
+                print(f"Person {i+1} - Latitude: {Latitude[i]}, Longitude: {Longitude[i]}, Distance: {distance[i]}")
+                print(Rssis)
+                # Simpan data baru sebagai previous_data
+                previous_data[i] = new_data
+
+    else:
+        print("Tidak ada data yang ditemukan di Firebase.")
+
+    # Panggil kembali fungsi setelah 1000 ms (1 detik)
+    root.after(2000, get_firebase_data)
+
+
+figure_canvas_ph = None  # Variabel global untuk menyimpan grafik
+
+
+# Fungsi untuk memperbarui grafik
+def update_plot(personel_index, pathcolor):
+    # Set style
+    plt.style.use("dark_background")
+    plt.rcParams.update({
+        'text.color': '0.9',
+        'axes.labelcolor': '0.9',
+        'xtick.color': '0.9',
+        'ytick.color': '0.9',
+        'figure.facecolor': '#2B2B36',
+        'axes.facecolor': '#2B2B36',
+        'savefig.facecolor': '#2B2B36'
+    })
+    
+    # Buat data untuk personel yang dipilih
+    df_ph = pd.DataFrame({'Heart Rate': heart_rate_data[personel_index]})
+
+    # Update grafik yang sudah ada
+    ax_ph.clear()  # Menghapus plot lama tanpa menghancurkan objek figure
+    df_ph.plot(marker='', color=electric_colors[pathcolor], ax=ax_ph)
+    ax_ph.fill_between(x=df_ph.index, y1=df_ph['Heart Rate'].values, y2=[0] * len(df_ph), 
+                       color=electric_colors[pathcolor], alpha=0.1)
+    
+    # Update grafik tambahan
+    ax_ph.set_title(f'Heart Rate Personel {personel_index + 1}', fontsize=10, loc="left")
+    ax_ph.set_xlabel('Index', fontsize=8)
+    ax_ph.set_ylabel('Beats Per Minute', fontsize=8)
+    ax_ph.tick_params(axis='both', which='major', labelsize=7)
+    ax_ph.grid(color='#2B2B36')
+
+    # Update canvas
+    figure_canvas_ph.draw()
+
+    # Perbarui setiap 1000ms (1 detik)
+    root.after(2000, update_plot, personel_index, pathcolor)
+
+def create_plot_rssi(personel_index):
+    global fig_rssi, ax_rssi, figure_canvas_rssi
+
+    if 'fig_rssi' not in globals():
+        # Dark background settings
+        plt.style.use("dark_background")
+        plt.rcParams.update({
+            'text.color': '0.9',
+            'axes.labelcolor': '0.9',
+            'xtick.color': '0.9',
+            'ytick.color': '0.9',
+            'figure.facecolor': '#2B2B36',
+            'axes.facecolor': '#2B2B36',
+            'savefig.facecolor': '#2B2B36'
+        })
+
+        # Example colors
+        colors = ['#00FF66']
+        
+        # Create a DataFrame for the selected slave's RSSI data
+        df_rssi = pd.DataFrame({'RSSI': Rssis[personel_index]})
+
+        # Create the plot
+        fig_rssi, ax_rssi = plt.subplots(figsize=(10, 3))
+        df_rssi.plot(marker=' ', color=electric_colors[personel_index], ax=ax_rssi)
+        ax_rssi.fill_between(x=df_rssi.index, y1=df_rssi['RSSI'].values, 
+                             y2=[0] * len(df_rssi), color=colors[0], alpha=0.1)
+        ax_rssi.grid(color='#2B2B36')
+        ax_rssi.set_xlim([ax_rssi.get_xlim()[0] - 0.2, ax_rssi.get_xlim()[1] + 0.2])
+        ax_rssi.set_title(' ', fontsize=10, loc="left")
+        ax_rssi.set_xlabel('Index', fontsize=8)
+        ax_rssi.set_title(f'RSSI for Slave {personel_index + 1}', fontsize=10, loc="left")
+        ax_rssi.set_ylabel('RSSI (dBm)', fontsize=8)
+        ax_rssi.tick_params(axis='both', which='major', labelsize=7)
+
+    return fig_rssi
+
+# Function to update the plot dynamically for the selected slave
+def update_plot_rssi(personel_index):
+    global fig_rssi, ax_rssi, figure_canvas_rssi
+
+    # Set style
+    plt.style.use("dark_background")
+    plt.rcParams.update({
+        'text.color': '0.9',
+        'axes.labelcolor': '0.9',
+        'xtick.color': '0.9',
+        'ytick.color': '0.9',
+        'figure.facecolor': '#2B2B36',
+        'axes.facecolor': '#2B2B36',
+        'savefig.facecolor': '#2B2B36'
+    })
+
+    # Create DataFrame for the selected slave's RSSI data
+    df_rssi = pd.DataFrame({'RSSI': Rssis[personel_index]})
+
+    # Update the existing plot
+    ax_rssi.clear()  # Clear the previous plot
+    df_rssi.plot(marker='', color=electric_colors[personel_index], ax=ax_rssi)
+    ax_rssi.fill_between(x=df_rssi.index, y1=df_rssi['RSSI'].values, y2=[0] * len(df_rssi), 
+                         color=electric_colors[personel_index], alpha=0.1)
+    
+    # Update plot labels and title
+    ax_rssi.set_title(f'RSSI for Slave {personel_index + 1}', fontsize=10, loc="left")
+    ax_rssi.set_xlabel('Index', fontsize=8)
+    ax_rssi.set_ylabel('RSSI (dBm)', fontsize=8)
+    ax_rssi.tick_params(axis='both', which='major', labelsize=7)
+    ax_rssi.grid(color='#2B2B36')
+
+    # Update canvas
+    figure_canvas_rssi.draw()
+
+    # Update every 2000ms (2 seconds)
+    root.after(2000, update_plot_rssi, personel_index)
+
+def create_rounded_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
+    """Membuat rounded rectangle di Canvas Tkinter."""
+    points = [
+        x1 + radius, y1,
+        x2 - radius, y1,
+        x2, y1, 
+        x2, y1 + radius,
+        x2, y2 - radius,
+        x2, y2,
+        x2 - radius, y2,
+        x1 + radius, y2,
+        x1, y2,
+        x1, y2 - radius,
+        x1, y1 + radius,
+        x1, y1
+    ]
+    return canvas.create_polygon(points, smooth=True, **kwargs)
+
+def on_press(event):
+    canvas.itemconfig(rect, fill="gold")  # Ubah warna menjadi emas saat ditekan
+
+def on_release(event):
+    canvas.itemconfig(rect, fill="black")  # Kembali ke hitam setelah dilepas
+
+# Fungsi untuk membuat kotak dengan sudut melengkung
+def rounded_rectangle(canvas, x1, y1, x2, y2, radius=20, **kwargs):
+    points = [x1+radius, y1, x1+radius, y1, x2-radius, y1, x2-radius, y1,
+              x2, y1, x2, y1+radius, x2, y1+radius, x2, y2-radius, x2, y2-radius,
+              x2, y2, x2-radius, y2, x2-radius, y2, x1+radius, y2, x1+radius, y2,
+              x1, y2, x1, y2-radius, x1, y2-radius, x1, y1+radius, x1, y1+radius,
+              x1, y1]
+    return canvas.create_polygon(points, **kwargs, smooth=True)
+
+
+def create_plot_ph(personel_index):
+    global fig_ph, ax_ph
+    global figure_canvas_ph, graph_frame_ph
+
+
+    if 'fig_ph' not in globals():  
+        plt.style.use("dark_background")
+        plt.rcParams.update({
+            'text.color': '0.9',
+            'axes.labelcolor': '0.9',
+            'xtick.color': '0.9',
+            'ytick.color': '0.9',
+            'figure.facecolor': '#2B2B36',
+            'axes.facecolor': '#2B2B36',
+            'savefig.facecolor': '#2B2B36'
+        })
+
+        colors = ['#FF073A']
+        df_ph = pd.DataFrame({'Hearth Rate': heart_rate_data[personel_index]})
+
+        fig_ph, ax_ph = plt.subplots()
+        df_ph.plot(marker=' ', color=colors, ax=ax_ph)
+        ax_ph.fill_between(x=df_ph.index, y1=df_ph['Hearth Rate'].values,
+                           y2=[0] * len(df_ph), color=colors[0], alpha=0.1)
+        ax_ph.grid(color='#2B2B36')
+        ax_ph.set_xlim([ax_ph.get_xlim()[0] - 0.2, ax_ph.get_xlim()[1] + 0.2])
+        ax_ph.set_title(' ', fontsize=10, loc="left")
+        ax_ph.set_xlabel('Index', fontsize=8)
+        ax_ph.set_title(f'Heart Rate Personel {personel_index+ 1}', fontsize=10, loc="left")
+        ax_ph.set_ylabel('Beats Per Minutes', fontsize=8)
+        ax_ph.tick_params(axis='both', which='major', labelsize=7)
+
+    return fig_ph
+"""
+def create_header(list_frame):
+    header_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10, height=30)
+    header_frame.grid(row=0, column=0, sticky="ew")  # Use grid for header_frame
+
+    headers = ["No", "Name", "Rate", "Summary"]
+    header_positions = [25, 120, 480, 590]  # Edit ini untuk mengatur posisi x dengan mudah
+    for i, header in enumerate(headers):
+        label = ctk.CTkLabel(header_frame, text=header, font=("Cyberpunk", 14, "bold"), text_color="#87888C")
+        label.place(x=header_positions[i], y=3)  # Posisi absolut
+
+# Fungsi untuk menampilkan data personel
+def create_personel_data(data, list_frame):
+    personel_labels = []  # Untuk menyimpan label yang akan diperbarui setiap 2 detik
+
+    # Menampilkan data personel
+    for idx, person in enumerate(data, start=1):
+        row_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10, height=20)
+        row_frame.grid(row=idx, column=0, sticky="ew", padx=10, pady=3)  # Use grid for row_frame
+
+        # Nomor Urut
+        number_label = ctk.CTkLabel(row_frame, text=str(idx), font=("Cyberpunk", 14), text_color="#EFE5E5")
+        number_label.grid(row=0, column=0, padx=20, pady=2)
+
+        # Nama Personel
+        name_label = ctk.CTkLabel(row_frame, text=person[0], font=("Cyberpunk", 14), text_color="#EFE5E5")
+        name_label.grid(row=0, column=1, padx=50, pady=2)
+
+        # Progress Bar
+        progress = ctk.CTkProgressBar(row_frame, width=100, height=8, fg_color="#22223b", progress_color=person[3])
+        progress.grid(row=0, column=2, padx=50, pady=2)
+        progress.set(person[1] / 100)
+
+        # Persentase Kesehatan
+        percentage_label = ctk.CTkLabel(row_frame, text=f"{person[1]}%", font=("Cyberpunk", 12), text_color="#EFE5E5", fg_color="#2B2B36", corner_radius=10)
+        percentage_label.grid(row=0, column=3, padx=50, pady=2)
+
+        # Label Status (Summary)
+        status_label = ctk.CTkLabel(row_frame, text=person[2], font=("Cyberpunk", 12), text_color="#EFE5E5", fg_color="#2B2B36", corner_radius=10)
+        status_label.grid(row=0, column=4, padx=10, pady=2)
+
+        # Simpan label yang akan diperbarui di personel_labels
+        personel_labels.append([progress, percentage_label, status_label, list(person)])  # gunakan list untuk person
+
+    return personel_labels  # Kembalikan label untuk diperbarui setiap 2 detik
+
+# Fungsi untuk update data setiap 2 detik (update)
+def update_personel_data(personel_labels, data):
+    # Update data dari array `data`
+    for idx, person in enumerate(data):
+        # Mengambil objek dari list (progress bar, percentage label, status label, data personel)
+        progress, percentage_label, status_label, person_data = personel_labels[idx]
+
+        # Update progress bar dan persentase label dengan data terbaru
+        progress.set(person[1] / 100)
+        percentage_label.configure(text=f"{person[1]}%")
+        status_label.configure(text=person[2])
+
+        # Update data terbaru ke dalam `person_data` (yang sekarang berupa list)
+        person_data[1] = person[1]  # Update rate di person_data
+        person_data[2] = person[2]  # Update status di person_data
+
+    # Update setiap 2 detik
+    root.after(2000, update_personel_data, personel_labels, data)
+"""
+
+def show_splash_screen():
+    # Create splash window
+    splash_root = tk.Tk()
+    splash_root.overrideredirect(True)  # Remove window borders
+    splash_root.geometry("1366x705")  # Position the splash screen in the middle
+    
+    # Load splash image (assuming it's in the same directory as the script)
+    splash_image = ImageTk.PhotoImage(Image.open(resource_path("splash wikan.png")))  # Replace with actual image path
+    splash_label = tk.Label(splash_root, image=splash_image)
+    splash_label.pack()
+
+    # Close splash screen after 3 seconds and open main window
+    splash_root.after(3000, splash_root.destroy)
+    
+    # Run splash screen
+    splash_root.mainloop()
+
+# Run splash screen before loading main window
+show_splash_screen()
+
+def draw_dashboard(canvas, width, height, image):
+    canvas.delete("all")
+    global ctk
+    global gmap_widget
+    global figure_canvas_ph, graph_frame_ph
+    global Latitude, Longitude
+    global personnel_frame
+    global list_frame
+    global fig_rssi, ax_rssi, figure_canvas_rssi
+    # Sidebar
+    sidebar_width = 200
+    canvas.create_rectangle(0, 0, sidebar_width, height, fill="#0D1721", outline="")
+
+    # Header utama
+    header_height = 300
+    header_x_start = sidebar_width + 20
+    header_x_end = width - 20
+    rounded_rectangle(canvas, header_x_start, 10, header_x_end, header_height, radius=20, fill="#2B2B36", outline="")
+
+    # Kotak untuk logo dan nama
+    logo_box_width = 0.97 * (header_x_end - header_x_start)
+    logo_box_height = 80
+    logo_x_start = header_x_start + (header_x_end - header_x_start - logo_box_width) / 2
+    logo_x_end = logo_x_start + logo_box_width
+    logo_y_start = 200
+    logo_y_end = logo_y_start + logo_box_height
+    
+    rounded_rectangle(canvas, logo_x_start, logo_y_start, logo_x_end, logo_y_end, radius=20, fill="#4a5568", outline="")
+    image_width = 60
+    image_height = 60
+    image_x = logo_x_start + 20
+    image_y = logo_y_start + (logo_box_height - image_height) // 2
+    canvas.create_image(image_x, image_y, image=image, anchor="nw")
+    text_x = image_x + image_width + 10
+    text_y = logo_y_start + logo_box_height // 2
+    canvas.create_text(text_x, text_y, text="D4 ELKASISTA 2025", anchor="w", font=("Arial", 16, "bold"), fill="#ffffff")
+
+    # Grid layout untuk konten
+    grid_top = header_height + 20
+    grid_height = (height - grid_top - 80) // 3 + 150
+    left_width = (width - sidebar_width - 60) * 2 // 3
+    right_width = (width - sidebar_width - 60) * 1 // 3
+
+    left_x_start = sidebar_width + 20
+    left_x_end = left_x_start + left_width
+    right_x_start = left_x_end + 20
+    right_x_end = right_x_start + right_width
+    
+    for i in range(3):
+        y_start = grid_top + i * (grid_height + 20)
+        y_end = y_start + grid_height
+
+        # Kotak kiri dan kanan
+        rounded_rectangle(canvas, left_x_start, y_start, left_x_end, y_end, radius=20, fill="#2B2B36", outline="")
+        rounded_rectangle(canvas, right_x_start, y_start, right_x_end, y_end, radius=20, fill="#2B2B36", outline="")
+
+        if i == 0:
+            # Google Maps di kotak kanan pertama
+            # Google Maps di kotak kanan pertama
+            gmap_frame = tk.Frame(canvas, bg="#2d3748")
+            canvas.create_window(right_x_start + 10, y_start + 10, anchor="nw", window=gmap_frame, width=right_width - 20, height=grid_height - 20)
+            gmap_widget = TkinterMapView(gmap_frame, width=right_width - 20, height=grid_height - 20, bg="#2d3748")
+            gmap_widget.pack(fill="both", expand=True)
+            gmap_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=100)
+
+
+            # Menampilkan data personel di kotak kiri pertama
+            frame_container = tk.Frame(canvas, bg="#2B2B36")
+            canvas.create_window(left_x_start + 5, y_start + 10, anchor="nw", 
+                                 window=frame_container, width=left_width - 10, height=grid_height - 20)
+            
+            # Frame utama untuk menampung personel
+            personnel_frame = tk.Frame(frame_container, bg="#2B2B36")
+            personnel_frame.pack(pady=5, padx=5)
+            update_ui(personel_data)  # Initial UI update
+            simulate_data_update()
+            """
+            for idx, person in enumerate(personel_data[:5]):  # Ambil hanya 5 personel
+                # Kotak luar sebagai border
+                border_frame = ctk.CTkFrame(personnel_frame, fg_color="#3A3A4A", corner_radius=10)
+                border_frame.grid(row=0, column=idx, padx=3, pady=3)  # Pakai grid agar sejajar
+
+                # Kotak utama personel (diperkecil)
+                frame = ctk.CTkFrame(border_frame, fg_color=CARD_COLOR, corner_radius=8, width=60, height=160)
+                frame.pack(padx=3, pady=3)
+
+                # Ikon personel (lingkaran kecil, lebih kecil)
+                icon = ctk.CTkCanvas(frame, width=20, height=20, bg=CARD_COLOR, highlightthickness=0)
+                icon.create_oval(3, 3, 18, 18, fill=person["color"], outline=person["color"])
+                icon.pack(pady=2)
+
+                # Nama personel (font lebih kecil)
+                name_label = ctk.CTkLabel(frame, text=person["name"], font=("Arial", 9, "bold"), text_color=TEXT_COLOR, wraplength=70)
+                name_label.pack(pady=1)
+
+                # Fungsi membuat satu baris label, progress bar, dan value
+                def create_data_row(label_text, value, unit, max_value):
+                    row_frame = ctk.CTkFrame(frame, fg_color=CARD_COLOR)
+                    row_frame.pack(fill="x", pady=1, padx=1)
+
+                    label = ctk.CTkLabel(row_frame, text=label_text, font=("Arial", 8), text_color=TEXT_COLOR, width=30, anchor="w")
+                    label.pack(side="left")
+
+                    bar = ctk.CTkProgressBar(row_frame, width=50, height=4, progress_color=person["color"], fg_color=CARD_COLOR)
+                    bar.set(value / max_value)
+                    bar.pack(side="left", padx=1)
+
+                    value_label = ctk.CTkLabel(row_frame, text=f"{value} {unit}", font=("Arial", 8), text_color=TEXT_COLOR, fg_color="#2B2B36", corner_radius=3, padx=2)
+                    value_label.pack(side="left")
+
+                create_data_row("HR", person["hr"], "Bpm", 150)
+                create_data_row("Tmp", person["temp"], "°C", 40)
+                create_data_row("RSSI", person["rssi"], "dB", 100)  
+             """
+        if i == 2:
+             global list_frame
+             
+             # List Personel di kotak kiri ketiga
+             list_frame = tk.Frame(canvas, bg="#2B2B36")
+             canvas.create_window(left_x_start + 5, y_start + 40, anchor="nw",
+                         window=list_frame, width=left_width - 10, height=grid_height - 50)
+
+              # Kotak kanan ketiga untuk grafik RSSI
+             graph_frame_rssi = tk.Frame(canvas, bg="#2B2B36")
+             canvas.create_window(right_x_start + 5, y_start + 30, anchor="nw",
+                         window=graph_frame_rssi, width=right_width - 10, height=grid_height - 50)
+
+             fig_rssi = create_plot_rssi(0)
+             figure_canvas_rssi = FigureCanvasTkAgg(fig_rssi, master=graph_frame_rssi)
+             figure_canvas_rssi.draw()
+             figure_canvas_rssi.get_tk_widget().pack(fill=tk.NONE, expand=False)
+             
+
+             #start_simulation()
+             start_simulation()
+    # Judul di atas grafik
+             canvas.create_text(right_x_start + 20, y_start + 14, text="Signal Strength (RSSI)", 
+                       anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+             #start_simulation()
+       
+        if i == 1:
+            # Grafik di kotak kiri kedua
+            
+            graph_frame_ph = tk.Frame(canvas)
+            canvas.create_window(left_x_start + 10, y_start + 50, anchor="nw", window=graph_frame_ph, width=left_width - 10, height=grid_height - 80)
+            fig_ph = create_plot_ph(0)
+            figure_canvas_ph = FigureCanvasTkAgg(fig_ph, master=graph_frame_ph)
+            figure_canvas_ph.draw()
+            figure_canvas_ph.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            canvas.create_text(left_x_start + 20, y_start + 14, text="Heart Rate", anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+
+            canvas.create_text(left_x_start + 20, y_start + 14, text="Heart Rate", anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+            
+            # Menambahkan tiga tombol sejajar horizontal di atas teks "Heart Rate"
+            button_width = (left_width - 200) // 8
+            button_spacing = 10  # Tambahkan spacing antar tombol
+            button_y_position = y_start + 10
+
+            for j in range(5):
+                
+                button_x_start = left_x_start + 350 + (button_width + button_spacing) * j  # Tambahkan spacing
+                button_x_end = button_x_start + button_width
+    
+                rect = rounded_rectangle(canvas, button_x_start, button_y_position, button_x_end, button_y_position + 30,
+                             radius=10, fill="#2B2B36", outline=btn_colors[j], width=0.5)
+                button_text = canvas.create_text((button_x_start + button_x_end) // 2, (button_y_position + button_y_position + 30) // 2,
+                                     text=f"Personel {j+1}", font=("Arial", 9, "bold"), fill=btn_colors[j])
+
+                def on_press(event, rect=rect, idx=j):
+                    canvas.itemconfig(rect, fill=btn_colors[idx])  
+                    update_plot(idx,idx)
+                    update_plot_rssi(idx)
+                def on_release(event, rect=rect):
+                    canvas.itemconfig(rect, fill="#2B2B36")  
+
+                canvas.tag_bind(rect, "<ButtonPress-1>", on_press)  
+                canvas.tag_bind(rect, "<ButtonRelease-1>", on_release)  
+                canvas.tag_bind(button_text, "<ButtonPress-1>", on_press)  
+                canvas.tag_bind(button_text, "<ButtonRelease-1>", on_release)  
+
+def maps(canvas, width, height, image):
+    canvas.delete("all")
+    
+    # Sidebar
+    sidebar_width = 200
+    canvas.create_rectangle(0, 0, sidebar_width, height, fill="#0D1721", outline="")
+
+    # Header utama
+    header_height = 300
+    header_x_start = sidebar_width + 20
+    header_x_end = width - 20
+    rounded_rectangle(canvas, header_x_start, 10, header_x_end, header_height, radius=20, fill="#2B2B36", outline="")
+
+    # Kotak untuk logo dan nama
+    logo_box_width = header_x_end - header_x_start  # Sesuaikan dengan header
+    logo_box_height = 80
+    logo_x_start = header_x_start
+    logo_x_end = header_x_end
+    logo_y_start = 200
+    logo_y_end = logo_y_start + logo_box_height
+    
+    rounded_rectangle(canvas, logo_x_start, logo_y_start, logo_x_end, logo_y_end, radius=20, fill="#4a5568", outline="")
+
+    # Tambahkan gambar dan teks di dalam kotak logo
+    image_width = 60
+    image_height = 60
+    image_x = logo_x_start + 20
+    image_y = logo_y_start + (logo_box_height - image_height) // 2
+    canvas.create_image(image_x, image_y, image=image, anchor="nw")
+    
+    text_x = image_x + image_width + 10
+    text_y = logo_y_start + logo_box_height // 2
+    canvas.create_text(text_x, text_y, text="Gabrielley", anchor="w", font=("Arial", 16, "bold"), fill="#ffffff")
+
+    # **Kotak tambahan untuk mengisi sisa tinggi**
+    def update_height():
+        canvas.update_idletasks()
+        full_height = max(height, canvas.winfo_reqheight())  # Ambil tinggi maksimum
+
+        info_x_start = header_x_start
+        info_x_end = header_x_end
+        info_y_start = header_height + 20
+        info_y_end = full_height  # **Mengisi sisa tinggi yang tersedia**
+
+        canvas.delete("extra_box")  # Hapus jika ada yang lama
+        rounded_rectangle(canvas, info_x_start, info_y_start, info_x_end, info_y_end + 320, radius=20, fill="#1E293B", outline="")
+
+        # Tambahkan teks dalam kotak tambahan
+        text_info_x = info_x_start + 20
+        text_info_y = info_y_start + 20
+        canvas.create_text(text_info_x, text_info_y, text="Google Maps", anchor="w", font=("Arial", 14, "bold"), fill="#ffffff", tags="extra_box")
+
+        # **Menambahkan Frame Google Maps**
+        right_x_start = info_x_start
+        right_width = info_x_end - info_x_start
+        y_start = info_y_start + 40  # Sedikit turun dari teks header
+        grid_height = info_y_end - y_start - 20  # Isi sisa ruang yang ada
+
+        gmap_frame = tk.Frame(canvas, bg="#2d3748")
+        canvas.create_window(right_x_start+10, y_start, anchor="nw", window=gmap_frame, width=right_width-20, height=grid_height+300)
+
+        gmap_widget = TkinterMapView(gmap_frame, width=right_width-200, height=grid_height, bg="#2d3748")
+        gmap_widget.pack(fill="both", expand=True)
+        gmap_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=22)
+        for i in range(5):
+            marker = gmap_widget.set_marker(Latitude[i], Longitude[i], text=f"Prajurit {i+1}")
+            markers.append(marker)
+
+        gmap_widget.set_position(Latitude[0], Longitude[0])
+
+        # Update marker secara real-time
+        update_markers(gmap_widget)
+       # Tunggu hingga ukuran terbaca dengan benar
+    canvas.after(5000, update_height)
+
+def draw_personil(canvas, width, height, image,ids):
+    canvas.delete("all")
+    global ctk
+    global gmap_widget
+    global figure_canvas_ph, graph_frame_ph
+    global Latitude, Longitude
+    # Sidebar
+    sidebar_width = 200
+    canvas.create_rectangle(0, 0, sidebar_width, height, fill="#0D1721", outline="")
+
+    # Header utama
+    header_height = 300
+    header_x_start = sidebar_width + 20
+    header_x_end = width - 20
+    rounded_rectangle(canvas, header_x_start, 10, header_x_end, header_height, radius=20, fill="#2B2B36", outline="")
+
+    # Kotak untuk logo dan nama
+    logo_box_width = 0.97 * (header_x_end - header_x_start)
+    logo_box_height = 80
+    logo_x_start = header_x_start + (header_x_end - header_x_start - logo_box_width) / 2
+    logo_x_end = logo_x_start + logo_box_width
+    logo_y_start = 200
+    logo_y_end = logo_y_start + logo_box_height
+    
+    rounded_rectangle(canvas, logo_x_start, logo_y_start, logo_x_end, logo_y_end, radius=20, fill="#4a5568", outline="")
+    image_width = 60
+    image_height = 60
+    image_x = logo_x_start + 20
+    image_y = logo_y_start + (logo_box_height - image_height) // 2
+    canvas.create_image(image_x, image_y, image=image, anchor="nw")
+    text_x = image_x + image_width + 10
+    text_y = logo_y_start + logo_box_height // 2
+    canvas.create_text(text_x, text_y, text="Gabrielley", anchor="w", font=("Arial", 16, "bold"), fill="#ffffff")
+
+    # Grid layout untuk konten
+    grid_top = header_height + 20
+    grid_height = (height - grid_top - 80) // 3 + 150
+    left_width = (width - sidebar_width - 60) * 2 // 3
+    right_width = (width - sidebar_width - 60) * 1 // 3
+
+    left_x_start = sidebar_width + 20
+    left_x_end = left_x_start + left_width
+    right_x_start = left_x_end + 20
+    right_x_end = right_x_start + right_width
+    
+    for i in range(3):
+        y_start = grid_top + i * (grid_height + 20)
+        y_end = y_start + grid_height
+
+        # Kotak kiri dan kanan
+        rounded_rectangle(canvas, left_x_start, y_start, left_x_end, y_end, radius=20, fill="#2B2B36", outline="")
+        rounded_rectangle(canvas, right_x_start, y_start, right_x_end, y_end, radius=20, fill="#2B2B36", outline="")
+
+        if i == 0:
+            # Google Maps di kotak kanan pertama
+            # Google Maps di kotak kanan pertama
+            gmap_frame = tk.Frame(canvas, bg="#2d3748")
+            canvas.create_window(right_x_start + 10, y_start + 10, anchor="nw", window=gmap_frame, width=right_width - 20, height=grid_height - 20)
+            gmap_widget = TkinterMapView(gmap_frame, width=right_width - 20, height=grid_height - 20, bg="#2d3748")
+            gmap_widget.pack(fill="both", expand=True)
+            gmap_widget.set_tile_server("https://mt0.google.com/vt/lyrs=s&hl=en&x={x}&y={y}&z={z}&s=Ga", max_zoom=100)
+
+
+
+            person = {
+                "name": Person1[ids][0],
+                "hr": Person1[ids][1],
+                "temp": Person1[ids][2],
+                "rssi": Person1[ids][3],
+                "color": Person1[ids][4]
+            }
+
+            frame_container = tk.Frame(canvas, bg="#2B2B36")
+            canvas.create_window(left_x_start + 5, y_start + 10, anchor="nw", 
+                                 window=frame_container, width=left_width - 10, height=grid_height - 20)
+
+            # Frame utama untuk menampung personel
+            personnel_frame = tk.Frame(frame_container, bg="#2B2B36")
+            personnel_frame.pack(pady=5, padx=5)
+
+                # Kotak luar sebagai border
+            border_frame = ctk.CTkFrame(personnel_frame, fg_color="#3A3A4A", corner_radius=10)
+            border_frame.grid(row=0, column=ids, padx=3, pady=3)  # Pakai grid agar sejajar
+
+                # Kotak utama personel
+            frame = ctk.CTkFrame(border_frame, fg_color=CARD_COLOR, corner_radius=8, width=150, height=200)
+            frame.pack(padx=3, pady=3)
+
+                # Ikon personel (lingkaran kecil)
+            icon = ctk.CTkCanvas(frame, width=30, height=30, bg=CARD_COLOR, highlightthickness=0)
+            icon.create_oval(5, 5, 25, 25, fill=person["color"], outline=person["color"])
+            icon.pack(pady=5)
+
+                # Nama personel
+            name_label = ctk.CTkLabel(frame, text=person["name"], font=("Arial", 12, "bold"), text_color=TEXT_COLOR)
+            name_label.pack(pady=5)
+
+            # Fungsi membuat satu baris label, progress bar, dan value
+            def create_data_row(label_text, value, unit, max_value):
+                row_frame = ctk.CTkFrame(frame, fg_color=CARD_COLOR)
+                row_frame.pack(fill="x", pady=2, padx=2)
+
+                label = ctk.CTkLabel(row_frame, text=label_text, font=("Arial", 10), text_color=TEXT_COLOR, width=40, anchor="w")
+                label.pack(side="left")
+
+                bar = ctk.CTkProgressBar(row_frame, width=80, height=5, progress_color=PROGRESS_COLOR, fg_color=CARD_COLOR)
+                bar.set(value / max_value)
+                bar.pack(side="left", padx=2)
+
+                value_label = ctk.CTkLabel(row_frame, text=f"{value} {unit}", font=("Arial", 10), text_color=TEXT_COLOR, fg_color="#2B2B36", corner_radius=3, padx=3)
+                value_label.pack(side="left")
+
+                # Tampilkan data HR, Suhu, dan RSSI
+            create_data_row("HR", person["hr"], "Bpm", 150)
+            create_data_row("Tmp", person["temp"], "°C", 40)
+            create_data_row("RSSI", person["rssi"], "dB", 100) 
+
+        if i == 2:
+# List Personel di kotak kiri ketiga
+             list_frame = tk.Frame(canvas, bg="#2B2B36")
+             canvas.create_window(left_x_start + 5, y_start + 40, anchor="nw",
+                     window=list_frame, width=left_width - 10, height=grid_height - 50)
+                  # Kotak kanan ketiga untuk grafik RSSI
+             graph_frame_rssi = tk.Frame(canvas, bg="#2B2B36")
+             canvas.create_window(right_x_start + 5, y_start + 40, anchor="nw",
+                         window=graph_frame_rssi, width=right_width - 10, height=grid_height - 40)
+
+             fig_rssi = create_plot_rssi()  
+             figure_canvas_rssi = FigureCanvasTkAgg(fig_rssi, master=graph_frame_rssi)
+             figure_canvas_rssi.draw()
+             figure_canvas_rssi.get_tk_widget().pack(fill=tk.NONE, expand=False)
+             update_plot_rssi()
+
+    # Judul di atas grafik
+             canvas.create_text(right_x_start + 20, y_start + 14, text="Signal Strength (RSSI)", 
+                        anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+# Header (No, Name, Rate, Summary)
+             header_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10, height=30)
+             header_frame.pack(fill="x")
+
+             headers = ["No", "Name", "Rate", "Summary"]
+             header_positions = [25, 120, 480, 590]  # Edit ini untuk mengatur posisi x dengan mudah
+
+             for i, header in enumerate(headers):
+                  label = ctk.CTkLabel(header_frame, text=header, font=("Cyberpunk", 14, "bold"), text_color="#87888C")
+                  label.place(x=header_positions[i], y=3)  # Posisi absolut
+# Menampilkan data personel
+             for idx, (name, rate, status, color) in enumerate(data, start=1):
+                  row_frame = ctk.CTkFrame(list_frame, fg_color="#2B2B36", corner_radius=10)
+                  row_frame.pack(fill="x", padx=10, pady=5)
+
+                 # Nomor Urut
+                  number_label = ctk.CTkLabel(row_frame, text=str(idx), font=("Cyberpunk", 14), text_color="#EFE5E5")
+                  number_label.pack(side="left", padx=20, pady=2)
+
+                 # Nama Personel
+                  name_label = ctk.CTkLabel(row_frame, text=name, font=("Cyberpunk", 14), text_color="#EFE5E5")
+                  name_label.pack(side="left", padx=50, pady=2)
+
+                 # Progress Bar
+                  progress = ctk.CTkProgressBar(row_frame, width=100, height=8, fg_color="#22223b", progress_color=color)
+                  progress.pack(side="left", padx=50, pady=2)
+                  progress.set(rate / 100)
+
+                 # Persentase Kesehatan
+                  percentage_label = ctk.CTkLabel(row_frame, text=f"{rate}%", font=("Cyberpunk", 12), text_color="#EFE5E5",
+                                    fg_color="#2B2B36", corner_radius=10)
+                  percentage_label.pack(side="left", padx=50, pady=2)
+
+                 # Label Status (Summary)
+                  status_label = ctk.CTkLabel(row_frame, text=status, font=("Cyberpunk", 12), text_color="#EFE5E5",
+                                fg_color="#2B2B36", corner_radius=10)
+                  status_label.pack(side="left", padx=10, pady=2)
+        
+        if i == 1:
+            # Grafik di kotak kiri kedua
+            graph_frame_ph = tk.Frame(canvas)
+            canvas.create_window(left_x_start + 10, y_start + 50, anchor="nw", window=graph_frame_ph, width=left_width - 10, height=grid_height - 80)
+            fig_ph = create_plot_ph(0)
+            figure_canvas_ph = FigureCanvasTkAgg(fig_ph, master=graph_frame_ph)
+            figure_canvas_ph.draw()
+            figure_canvas_ph.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+            canvas.create_text(left_x_start + 20, y_start + 14, text="Heart Rate", anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+
+            canvas.create_text(left_x_start + 20, y_start + 14, text="Heart Rate", anchor="w", font=("Inter", 12, "bold"), fill="#ffffff")
+            
+            # Menambahkan tiga tombol sejajar horizontal di atas teks "Heart Rate"
+            button_width = (left_width - 200) // 8
+            button_spacing = 10  # Tambahkan spacing antar tombol
+            button_y_position = y_start + 10
+            update_plot(ids,ids)
+             
+
+
+
+root = tk.Tk()
+root.title("Dashboard WikanTrack")
+
+screen_width = root.winfo_screenwidth()
+screen_height = root.winfo_screenheight()
+window_width = 1440
+window_height = 1252
+if window_width > screen_width or window_height > screen_height:
+    window_width = screen_width
+    window_height = screen_height
+root.geometry(f"{window_width}x{window_height}")
+root.configure(bg="#0D1721")
+
+frame = tk.Frame(root, bg="#0D1721")
+frame.pack(fill="both", expand=True)
+# Sidebar frame
+scrollbar = tk.Scrollbar(frame, orient="vertical")
+scrollbar.pack(side="right", fill="y")
+
+canvas = Canvas(frame, bg="#0D1721", highlightthickness=0, yscrollcommand=scrollbar.set)
+canvas.pack(side="left", fill="both", expand=True)
+scrollbar.config(command=canvas.yview)
+
+sidebar = tk.Frame(canvas, width=180, bg="#0D1721")
+sidebar.pack(side="left", fill="y", padx=10, pady=10)
+sidebar.pack_propagate(False)
+
+def on_button_click(text):
+    content_label.configure(text=text)
+
+# Fungsi untuk menambahkan tombol dengan ikon
+def add_icon_button(frame, icon, text, command=None, active=False):
+    fg_color = "#3B82F6" if active else "#2A2A2A"
+    
+    return ctk.CTkButton(
+        frame,
+        text=f"{icon}  {text}",
+        font=MATERIAL_FONT,
+        anchor="w",
+        text_color="white",
+        fg_color=fg_color,
+        hover_color="#3B82F6",
+        width=200,
+        height=40,
+        command=command if command else lambda: on_button_click(text)  # Gunakan command jika ada
+    )
+
+#image_path = "C:/Users/ferdi/OneDrive - Universitas Negeri Malang/Documents/wikanapps/WIKAN SLEMPANG PUTIH BEVEL SINGLE PNG.png"
+original_image = Image.open(resource_path("elkasista.png"))
+resized_image = original_image.resize((60, 60))
+image = ImageTk.PhotoImage(resized_image)
+
+
+# Run splash screen before loading main window
+#show_splash_screen()
+
+
+draw_dashboard(canvas, window_width, window_height, image)
+
+# Tambahkan tombol di sidebar
+dashboard_btn = add_icon_button(sidebar, " ", "     Wikan Tracking", active=True)
+dashboard_btn.pack(pady=8, fill="x")
+
+conversations_btn = add_icon_button(sidebar, "💬", "Dashboard",command=lambda: draw_dashboard(canvas, window_width, window_height, image))
+conversations_btn.pack(pady=8, fill="x")
+
+maps_btn = add_icon_button(sidebar, "🗺️", "Maps", command=lambda: maps(canvas, window_width, window_height, image))
+maps_btn.pack(pady=8, fill="x")
+"""
+projects_btn1 = add_icon_button(sidebar, "🧢", "Personil 1",command=lambda:draw_personil(canvas, window_width, window_height, image,0))
+projects_btn1.pack(pady=8, fill="x")
+
+projects_btn2 = add_icon_button(sidebar, "🧢", "Personil 2",command=lambda:draw_personil(canvas, window_width, window_height, image,1))
+projects_btn2.pack(pady=8, fill="x")
+
+projects_btn3 = add_icon_button(sidebar, "🧢", "Personil 3",command=lambda:draw_personil(canvas, window_width, window_height, image,2))
+projects_btn3.pack(pady=8, fill="x")
+
+projects_btn4 = add_icon_button(sidebar, "🧢", "Personil 4",command=lambda:draw_personil(canvas, window_width, window_height, image,3))
+projects_btn4.pack(pady=8, fill="x")
+
+projects_btn5 = add_icon_button(sidebar, "🧢", "Personil 5",command=lambda:draw_personil(canvas, window_width, window_height, image,4))
+projects_btn5.pack(pady=8, fill="x")
+"""
+separator_label = tk.Label(sidebar, text="ACCOUNT PAGES", font=("Arial", 10, "bold"), bg="#0D1721", fg="white",anchor="w")
+separator_label.pack(pady=10,fill="x")
+
+resources_btn = add_icon_button(sidebar, "📚", "Profile")
+resources_btn.pack(pady=8, fill="x")
+
+help_btn = add_icon_button(sidebar, "❓", "Sign In")
+help_btn.pack(pady=8, fill="x")
+
+settings_btn = add_icon_button(sidebar, "⚙️", "Log In")
+settings_btn.pack(pady=8, fill="x")
+
+# Start the thread
+#threading.Thread(target=get_firebase_data_thread, daemon=True).start()
+root.after(1000, get_firebase_data)
+canvas.update_idletasks()
+canvas.config(scrollregion=canvas.bbox("all"))
+
+root.mainloop()
