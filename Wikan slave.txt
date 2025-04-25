@@ -1,0 +1,454 @@
+#include <Wire.h>
+#include <LoRa.h>
+#include <TinyGPS++.h>
+#include <HardwareSerial.h>
+#include "MAX30105.h"
+#include "heartRate.h"
+#include <ArduinoJson.h>
+#include <math.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+#define LM35_PIN 3
+
+// Jumlah sampel untuk filtering
+#define NUM_SAMPLES 10
+#define NSS 0
+#define RST 10
+#define DIO0 7
+
+#define EARTH_RADIUS 6371.0  
+int sampleIndex = 0;
+int totalBPM = 0;
+int avgBpm = 0;
+long lastBeat = 0;
+float adjustBPM;
+long irValue;
+long delta;
+float beatsPerMinute;
+int beatAvg;
+const byte RATE_SIZE = 4; 
+byte rates[RATE_SIZE]; 
+byte rateSpot = 0;
+uint8_t syncWords[] = { 0x11, 0x12,0x22, 0x33, 0x44};  // SyncWord untuk berbagai pengirim
+int currentSyncIndex = 0;
+MAX30105 particleSensor;
+TinyGPSPlus gps;
+HardwareSerial SerialGPS(1);
+const long randomOffset = random(500, 1500);
+const int deviceID = 2;
+
+struct SensorData {
+    int id;
+    int bpm;
+    int rssi;
+    int avgBpm;
+    float suhu;
+    double latitude;
+    double longitude;
+    String status;
+    float jarak;
+};
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+#define OLED_RESET    -1
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+SensorData receivedData[5];
+unsigned long lastLoRaReceiveTime = 0;
+const long loRaReceiveInterval = 1500;
+float temperature = 0.0;
+int bpm = 0;
+String status = "Hidup"; 
+//unsigned long lastLCDUpdate = 0;
+unsigned long lastSendTime = 0;
+unsigned long lastReadTime = 0;
+const long sendInterval = 1000;  
+const long readInterval = 1000;  
+const long bpmReadInterval = 50;
+unsigned long lastBPMReadTime = 0;
+//===============
+const unsigned long heartRateInterval = 20;    // 50Hz
+const unsigned long sensorInterval = 1000;     // 1 detik
+const unsigned long loRaSendInterval = 1000;   // 2 detik
+const unsigned long lcdUpdateInterval = 2000;  // 2 detik
+//================
+
+
+// Timestamp
+unsigned long lastSensorRead = 0;
+unsigned long lastLoRaSend = 0;
+unsigned long lastLCDUpdate = 0;
+
+void processHeartRate() {
+    long irValue = particleSensor.getIR();
+    if (checkForBeat(irValue)) {
+        delta = millis() - lastBeat;
+        lastBeat = millis();
+        beatsPerMinute = 60 / (delta / 1000.0);
+        adjustBPM = beatsPerMinute;
+
+        if (adjustBPM > 20 && adjustBPM < 255) {
+            rates[rateSpot++] = (byte)adjustBPM;
+            rateSpot %= RATE_SIZE;
+
+            beatAvg = 0;
+            for (byte x = 0; x < RATE_SIZE; x++) {
+                beatAvg += rates[x];
+            }
+            beatAvg /= RATE_SIZE;
+        }
+    }
+    
+    if (irValue < 50000) {
+        adjustBPM = 0;
+    }
+}
+
+void readSensors() {
+    temperature = readTemperature();
+
+    while (SerialGPS.available() > 0) {
+        char c = SerialGPS.read();
+        if (gps.encode(c)) {
+            displayGPSInfo();
+        }
+    }
+
+    if (beatAvg < 40 || beatAvg > 180 && temperature < 29 || temperature > 39) {
+        status = "Mati";
+    } else {
+        status = "Hidup";
+    }
+
+    Serial.println("Sensor Diperbarui");
+}
+
+float readTemperature() {
+    int sum = 0;
+    
+    // Mengambil beberapa sampel untuk meredam noise
+    for (int i = 0; i < NUM_SAMPLES; i++) {
+        sum += analogRead(LM35_PIN);
+        delay(10);
+    }
+    
+    int analogValue = sum / NUM_SAMPLES; // Rata-rata nilai ADC
+    float voltage = analogValue * (3.3 / 4095.0); // Konversi ke tegangan
+    float temperature = voltage * 100.0-8; // Konversi ke suhu
+    
+    return temperature;
+}
+void sendLoRaData() {
+    StaticJsonDocument<256> doc;
+    doc["ID"] = deviceID;
+    doc["BPM"] = beatsPerMinute;
+    doc["AVG"] = beatAvg;
+    doc["Temp"] = temperature;
+    doc["Lat"] = gps.location.lat();
+    doc["Lon"] = gps.location.lng();
+    doc["Status"] = status;
+    String data;
+    serializeJson(doc, data);
+                    receivedData[4].id = deviceID;
+                    receivedData[4].bpm = beatsPerMinute;
+                    receivedData[4].avgBpm = beatAvg;
+                    receivedData[4].suhu = temperature;
+                    receivedData[4].latitude = gps.location.lat();
+                    receivedData[4].longitude = gps.location.lng();
+    Serial.println("Mengirim data LoRa: " + data);
+    // SyncWord tetap untuk pengiriman
+    LoRa.setSyncWord(0x12);
+    LoRa.beginPacket();
+    LoRa.print(data);
+    LoRa.endPacket();
+    LoRa.receive();  // <--- INI JUGA WAJIB
+}
+
+void receiveLoRaData() {
+    // Gunakan syncWord dinamis untuk penerimaan
+    //LoRa.setSyncWord(syncWords[currentSyncIndex]);
+
+    if (LoRa.parsePacket()) {
+        Serial.println("Menerima paket LoRa...");
+        String receivedDataStr = "";
+        while (LoRa.available()) {
+            receivedDataStr += (char)LoRa.read();
+        }
+
+        if (receivedDataStr != "") {
+            Serial.println("Data diterima: " + receivedDataStr);
+            int rssi = LoRa.packetRssi();
+            StaticJsonDocument<256> doc;
+            DeserializationError error = deserializeJson(doc, receivedDataStr);
+
+            if (error) {
+                Serial.print("Gagal parsing JSON: ");
+                Serial.println(error.c_str());
+                return;
+            }
+
+            int senderID = doc["ID"];
+            if (senderID == deviceID) return;  // Abaikan data dari perangkat sendiri
+
+            bool sudahAda = false;
+            int emptySlot = -1;
+
+            // Periksa apakah ID perangkat sudah ada dalam array receivedData
+            for (int i = 0; i < 4; i++) {
+                if (receivedData[i].id == senderID) {
+                    receivedData[i].bpm = doc["BPM"];
+                    receivedData[i].avgBpm = doc["AVG"];
+                    receivedData[i].suhu = doc["Temp"];
+                    receivedData[i].latitude = doc["Lat"];
+                    receivedData[i].longitude = doc["Lon"];
+                    receivedData[i].status = doc["Status"].as<String>();
+                    receivedData[i].jarak = haversine(gps.location.lat(), gps.location.lng(), receivedData[i].latitude, receivedData[i].longitude);
+                    Serial.print("Data Diperbarui ID: ");
+                    Serial.println(senderID);
+                    sudahAda = true;
+                    break;
+                }
+
+                if (receivedData[i].id == 0 && emptySlot == -1) {
+                    emptySlot = i;
+                }
+            }
+
+            if (!sudahAda && emptySlot != -1) {
+                receivedData[emptySlot].id = senderID;
+                receivedData[emptySlot].bpm = doc["BPM"];
+                receivedData[emptySlot].rssi = rssi;
+                receivedData[emptySlot].avgBpm = doc["AVG"];
+                receivedData[emptySlot].suhu = doc["Temp"];
+                receivedData[emptySlot].latitude = doc["Lat"];
+                receivedData[emptySlot].longitude = doc["Lon"];
+                receivedData[emptySlot].status = doc["Status"].as<String>();
+                receivedData[emptySlot].jarak = haversine(gps.location.lat(), gps.location.lng(), receivedData[emptySlot].latitude, receivedData[emptySlot].longitude);
+                Serial.print("Data baru ditambahkan di index ke-");
+                Serial.println(emptySlot);
+            }
+        }
+
+        // Update currentSyncIndex untuk penerimaan berikutnya
+
+    }
+}
+
+void displayGPSInfo() {
+    if (gps.location.isValid()) {
+        double latitude = gps.location.lat();
+        double longitude = gps.location.lng();
+    } else {
+        Serial.println("Location: Not Available");
+    }
+}
+
+double haversine(double lat1, double lon1, double lat2, double lon2) {
+    double dLat = radians(lat2 - lat1);
+    double dLon = radians(lon2 - lon1);
+    lat1 = radians(lat1);
+    lat2 = radians(lat2);
+
+    double a = sin(dLat / 2) * sin(dLat / 2) +
+               cos(lat1) * cos(lat2) * 
+               sin(dLon / 2) * sin(dLon / 2);
+               
+    double c = 2 * atan2(sqrt(a), sqrt(1 - a));
+    double distance = 6371000 * c; // Hasil dalam meter
+
+    return distance;
+}
+
+void printReceivedData() {
+    Serial.println("=== Data Perangkat Lain ===");
+    for (int i = 0; i < 5; i++) {
+        if (receivedData[i].id != 0) {
+            Serial.print("ID: "); Serial.println(receivedData[i].id);
+            Serial.print("BPM: "); Serial.println(receivedData[i].bpm);
+            Serial.print("Rata-rata BPM: "); Serial.println(receivedData[i].avgBpm);
+            Serial.print("Suhu: "); Serial.print(receivedData[i].suhu); Serial.println(" °C");
+            Serial.print("Latitude: "); Serial.println(receivedData[i].latitude, 6);
+            Serial.print("Longitude: "); Serial.println(receivedData[i].longitude, 6);
+            Serial.print("Status: "); Serial.println(receivedData[i].status);
+            Serial.print("RSSI: "); Serial.print(receivedData[i].rssi); Serial.println(" dBm");
+            Serial.print("Jarak: "); Serial.print(receivedData[i].jarak); Serial.println(" km");
+            Serial.println("-------------------------");
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(WHITE);
+                display.setCursor(0, 5);
+                display.print("ID: "); display.println(receivedData[i].id);
+                display.setCursor(0, 15);
+                display.print("Status: "); display.println(receivedData[i].status);
+                display.setCursor(0, 25);
+                display.print("Rssi: "); display.print(receivedData[i].rssi); display.println(" dbm");
+                display.setCursor(0, 35);
+                display.print("Jarak: "); display.print(receivedData[i].jarak); display.println(" m");
+                display.setCursor(0, 45);
+                display.print("Lat: "); display.println(receivedData[i].latitude, 6);
+                display.setCursor(0, 55);
+                display.print("Lon: "); display.println(receivedData[i].longitude, 6);
+                display.display();
+                delay (1000);
+        }
+    }
+}
+
+void displayData() {
+    static int page = 0;
+    display.clearDisplay();
+    display.setCursor(0, 0);
+
+    if (page == 0) {
+        display.setCursor(0, 5);
+        display.println("Device Sendiri");
+        display.setCursor(0, 15);
+        display.print("ID: "); display.println(deviceID);
+        display.setCursor(0, 25);
+        display.print("BPM: "); display.println(beatAvg);
+        display.setCursor(0, 35);
+        display.print("Temp: "); display.print(temperature); display.println(" C");
+        display.setCursor(0, 45);
+        display.print("Lat: "); display.println(gps.location.lat(), 6);
+        display.setCursor(0, 55);
+        display.print("Lon: "); display.println(gps.location.lng(), 6);
+    } else {
+        display.println("Device Lain");
+        bool found = false;
+        for (int i = 0; i < 4; i++) {
+            if (receivedData[i].id != 0) {
+                display.clearDisplay();
+                display.setTextSize(1);
+                display.setTextColor(WHITE);
+                display.setCursor(0, 5);
+                display.print("ID: "); display.println(receivedData[i].id);
+                display.setCursor(0, 15);
+                display.print("Status: "); display.println(receivedData[i].status);
+                display.setCursor(0, 25);
+                display.print("Rssi: "); display.print(receivedData[i].rssi); display.println(" dbm");
+                display.setCursor(0, 35);
+                display.print("Jarak: "); display.print(receivedData[i].jarak); display.println(" km");
+                display.setCursor(0, 45);
+                display.print("Lat: "); display.println(receivedData[i].latitude, 6);
+                display.setCursor(0, 55);
+                display.print("Lon: "); display.println(receivedData[i].longitude, 6);
+                display.display();
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
+            display.clearDisplay();
+            display.setTextSize(1);
+            display.setTextColor(WHITE);
+            display.println("Belum ada data");
+            display.display();
+        }
+    }
+
+    display.display();
+    page = (page + 1) % 2;
+}
+void heartRateTask(void *pvParameters) {
+    while (true) {
+        processHeartRate();
+        vTaskDelay(pdMS_TO_TICKS(heartRateInterval));  // delay 20ms
+    }
+}
+void backgroundTask(void *pvParameters) {
+    while (true) {
+        unsigned long currentMillis = millis();
+
+        // Read sensors
+
+        readSensors();
+        receiveLoRaData();
+        
+
+        // Kirim LoRa
+        if (currentMillis - lastLoRaSend >= loRaSendInterval) {
+            lastLoRaSend = currentMillis;
+            sendLoRaData();
+        }
+
+        // Terima LoRa (bisa juga dijalankan langsung)
+        
+
+
+        // Update LCD
+        if (currentMillis - lastLCDUpdate >= lcdUpdateInterval) {
+            lastLCDUpdate = currentMillis;
+            printReceivedData();
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10)); // Jangan bikin 100% CPU
+    }
+}
+void setup() {
+    Serial.begin(115200); 
+    SerialGPS.begin(9600, SERIAL_8N1, 20, 21); 
+    Serial.println("GPS Module is initializing...");
+    
+    LoRa.setPins(NSS, RST, DIO0);
+    if (!LoRa.begin(923E6)) {
+        Serial.println("LoRa gagal start");
+        while (1);
+    }
+    // SyncWord untuk pengiriman tetap
+    LoRa.setSyncWord(0x12);  // Set syncWord tetap untuk pengiriman
+    LoRa.setSpreadingFactor(10);
+    LoRa.setSignalBandwidth(125E3);
+    LoRa.setCodingRate4(5);
+    LoRa.enableCrc();
+    Serial.println("LoRa siap mengirim data");
+    
+    if (!particleSensor.begin(Wire, I2C_SPEED_STANDARD)) {
+        Serial.println("Sensor MAX30102 tidak ditemukan!");
+        while (1);
+    }
+    particleSensor.setup();
+    particleSensor.setPulseAmplitudeRed(0x0A);
+    particleSensor.setPulseAmplitudeIR(0x0A);
+    
+    Serial.println("Sistem siap...");
+    if (!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+        Serial.println(F("SSD1306 gagal"));
+        while (1);
+    }
+    display.clearDisplay();
+    display.setTextSize(1);
+    display.setTextColor(WHITE);
+    display.setCursor(0, 0);
+    display.print("Initializing...");
+    display.display();
+    delay(2000);
+    Serial.print("start");
+    LoRa.receive();  // <--- INI JUGA WAJIB
+
+        xTaskCreatePinnedToCore(
+        heartRateTask,
+        "HeartRate",
+        2048,
+        NULL,
+        2,      // Prioritas lebih tinggi
+        NULL,
+        0       // Core 0 (C3 hanya 1 core)
+    );
+
+    // Task Background: Sensor lain, LoRa, OLED
+    xTaskCreatePinnedToCore(
+        backgroundTask,
+        "Background",
+        4096,
+        NULL,
+        1,      // Prioritas lebih rendah
+        NULL,
+        0
+    );
+}
+
+
+
+void loop() {
+
+}
